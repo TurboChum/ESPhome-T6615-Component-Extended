@@ -1,0 +1,16 @@
+#pragma once
+
+#include "esphome/components/button/button.h"
+#include "../t6615.h"
+
+namespace esphome::t6615 {
+
+class WarmResetButton : public button::Button, public Parented<T6615Component> {
+ public:
+  WarmResetButton() = default;
+
+ protected:
+  void press_action() override;
+};
+
+}  // namespace esphome::t6615

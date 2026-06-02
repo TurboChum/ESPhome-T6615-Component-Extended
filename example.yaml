@@ -1,0 +1,86 @@
+substitutions:
+  device_name: co2-sensor
+  friendly_name: "CO2 Sensor"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32dev
+
+# ----- External component -----
+external_components:
+  - source:
+      type: git
+      url: https://github.com/TurboChum/ESPhome-T6615-Component-Extended
+    components: [t6615]
+
+# ----- UART bus -----
+uart:
+  id: uart_bus
+  baud_rate: 19200
+  rx_pin: GPIO16
+  tx_pin: GPIO17
+
+# ----- T6615 component -----
+t6615:
+  id: my_t6615
+  uart_id: uart_bus
+  update_interval: 60s   # how often PPM + status are polled
+
+# ----- CO2 and elevation (read-only) -----
+sensor:
+  - platform: t6615
+    t6615_id: my_t6615
+    co2:
+      name: "CO2"
+    elevation_reading:
+      name: "Elevation (stored)"
+
+# ----- Firmware / serial info -----
+text_sensor:
+  - platform: t6615
+    t6615_id: my_t6615
+    serial_number:
+      name: "Serial Number"
+    firmware_version:
+      name: "Firmware Version"
+    firmware_date:
+      name: "Firmware Date"
+
+# ----- Status flags -----
+binary_sensor:
+  - platform: t6615
+    t6615_id: my_t6615
+    error_flag:
+      name: "Sensor Error"
+    warmup_flag:
+      name: "Sensor Warming Up"
+    calibrating_flag:
+      name: "Calibrating"
+
+# ----- Idle mode switch -----
+switch:
+  - platform: t6615
+    t6615_id: my_t6615
+    idle_mode:
+      name: "Idle Mode (lamp off)"
+
+# ----- Action buttons -----
+button:
+  - platform: t6615
+    t6615_id: my_t6615
+    warm_reset:
+      name: "Warm Reset"
+    trigger_calibration:
+      name: "Trigger Single-Point Calibration"
+
+# ----- Writable numbers -----
+number:
+  - platform: t6615
+    t6615_id: my_t6615
+    elevation:
+      name: "Elevation (set)"
+    calibration_ppm_target:
+      name: "Calibration PPM Target"

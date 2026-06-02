@@ -1,5 +1,5 @@
 import esphome.codegen as cg
-from esphome.components import sensor, uart
+from esphome.components import sensor
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_CO2,
@@ -9,38 +9,39 @@ from esphome.const import (
     UNIT_PARTS_PER_MILLION,
 )
 
-CODEOWNERS = ["@tylermenezes"]
-DEPENDENCIES = ["uart"]
+from . import CONF_T6615_ID, T6615Component, t6615_ns
 
-t6615_ns = cg.esphome_ns.namespace("t6615")
-T6615Component = t6615_ns.class_("T6615Component", cg.PollingComponent, uart.UARTDevice)
+DEPENDENCIES = ["t6615"]
 
-CONFIG_SCHEMA = (
-    cv.Schema(
-        {
-            cv.GenerateID(): cv.declare_id(T6615Component),
-            cv.Optional(CONF_CO2): sensor.sensor_schema(
-                unit_of_measurement=UNIT_PARTS_PER_MILLION,
-                accuracy_decimals=0,
-                device_class=DEVICE_CLASS_CARBON_DIOXIDE,
-                state_class=STATE_CLASS_MEASUREMENT,
-            ),
-        }
-    )
-    .extend(cv.polling_component_schema("60s"))
-    .extend(uart.UART_DEVICE_SCHEMA)
-)
+CONF_ELEVATION_READING = "elevation_reading"
 
-FINAL_VALIDATE_SCHEMA = uart.final_validate_device_schema(
-    "t6615", baud_rate=19200, require_rx=True, require_tx=True
+CONFIG_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(CONF_ID): cv.declare_id(cg.EntityBase),
+        cv.GenerateID(CONF_T6615_ID): cv.use_id(T6615Component),
+        cv.Optional(CONF_CO2): sensor.sensor_schema(
+            unit_of_measurement=UNIT_PARTS_PER_MILLION,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_CARBON_DIOXIDE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_ELEVATION_READING): sensor.sensor_schema(
+            unit_of_measurement="ft",
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+            icon="mdi:elevation-rise",
+        ),
+    }
 )
 
 
 async def to_code(config):
-    var = cg.new_Pvariable(config[CONF_ID])
-    await cg.register_component(var, config)
-    await uart.register_uart_device(var, config)
+    parent = await cg.get_variable(config[CONF_T6615_ID])
 
-    if co2 := config.get(CONF_CO2):
-        sens = await sensor.new_sensor(co2)
-        cg.add(var.set_co2_sensor(sens))
+    if co2_config := config.get(CONF_CO2):
+        sens = await sensor.new_sensor(co2_config)
+        cg.add(parent.set_co2_sensor(sens))
+
+    if elev_config := config.get(CONF_ELEVATION_READING):
+        sens = await sensor.new_sensor(elev_config)
+        cg.add(parent.set_elevation_sensor(sens))

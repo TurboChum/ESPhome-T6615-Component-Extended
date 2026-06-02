@@ -1,0 +1,16 @@
+# Claude Code
+CLAUDE.md
+SESSION_NOTES.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.code-workspace
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
