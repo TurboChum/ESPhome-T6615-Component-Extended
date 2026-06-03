@@ -5,9 +5,16 @@ SESSION_NOTES.md
 # Development / test scripts
 t6615_*.py
 
+# Personal ESPHome device configs (contain secrets/keys)
+*.yaml
+!example.yaml
+
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs
+*.log
 
 # Editor
 .vscode/
