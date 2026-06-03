@@ -135,6 +135,11 @@ class T6615Component : public PollingComponent, public uart::UARTDevice {
   uint32_t command_time_{0};
   std::deque<T6615PendingCommand> command_queue_;
 
+  // Startup delay — sensor needs several seconds after power-up before
+  // it will respond to any UART commands (per datasheet)
+  bool boot_sequence_queued_{false};
+  uint32_t setup_time_{0};
+
   // Calibration armed interlock
   bool cal_armed_{false};
   uint32_t cal_armed_time_{0};

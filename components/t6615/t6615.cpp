@@ -16,7 +16,7 @@ static const uint8_t  T6615_ADDR_SENSOR  = 0xFE;
 // ---------------------------------------------------------------------------
 
 void T6615Component::setup() {
-  this->queue_boot_sequence_();
+  this->setup_time_ = millis();
 }
 
 void T6615Component::queue_boot_sequence_() {
@@ -24,6 +24,7 @@ void T6615Component::queue_boot_sequence_() {
   this->command_queue_.push_back({T6615Command::GET_FIRMWARE_VERSION});
   this->command_queue_.push_back({T6615Command::GET_FIRMWARE_DATE});
   this->command_queue_.push_back({T6615Command::GET_ELEVATION});
+  this->command_queue_.push_back({T6615Command::GET_CAL_PPM_TARGET});
   this->command_queue_.push_back({T6615Command::GET_ABC});
   this->command_queue_.push_back({T6615Command::GET_STATUS});
 }
@@ -45,6 +46,13 @@ void T6615Component::update() {
 // ---------------------------------------------------------------------------
 
 void T6615Component::loop() {
+  // Delay boot sequence — sensor needs several seconds after power-up
+  // before it responds to any UART commands (per datasheet)
+  if (!this->boot_sequence_queued_ && (millis() - this->setup_time_ >= 8000)) {
+    this->queue_boot_sequence_();
+    this->boot_sequence_queued_ = true;
+  }
+
   // Auto-disarm calibration armed switch after timeout
 #ifdef USE_SWITCH
   if (this->cal_armed_ && (millis() - this->cal_armed_time_ > T6615_CAL_ARMED_TIMEOUT_MS)) {
@@ -175,7 +183,9 @@ void T6615Component::send_command_(const T6615PendingCommand &pending) {
     case T6615Command::WARM_RESET:
       this->write_byte(1); this->write_byte(0x84);
       // Sensor may or may not ACK before resetting; treat as fire-and-forget.
-      this->queue_boot_sequence_();
+      // Re-arm the startup delay so boot sequence waits for sensor to restart.
+      this->boot_sequence_queued_ = false;
+      this->setup_time_ = millis();
       this->command_ = T6615Command::NONE;
       return;
 
