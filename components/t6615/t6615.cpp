@@ -80,11 +80,28 @@ void T6615Component::loop() {
     return;
   }
 
-  // Timeout: swallow stale bytes, move on
+  // Timeout handling — behaviour depends on command
   if (millis() - this->command_time_ > T6615_TIMEOUT) {
-    ESP_LOGW(TAG, "Timeout on command %u", (uint8_t) this->command_);
     while (this->available())
       this->read();
+
+    if (this->command_ == T6615Command::GET_PPM) {
+      // Sensor silently drops commands during its internal DSP cycle (1-2s).
+      // Per datasheet: simply re-send. Retry once immediately.
+      ESP_LOGD(TAG, "GET_PPM dropped by sensor DSP cycle — retrying");
+      this->send_command_({T6615Command::GET_PPM});
+      return;
+    }
+
+    if (this->command_ == T6615Command::GET_ABC) {
+      // T6615 uses a sealed reference channel and does not implement ABC logic.
+      // This timeout is expected on T6615 hardware — not a comms error.
+      ESP_LOGD(TAG, "GET_ABC not acknowledged (expected on T6615 — no ABC on dual-beam sensor)");
+      this->command_ = T6615Command::NONE;
+      return;
+    }
+
+    ESP_LOGW(TAG, "Timeout on command %u", (uint8_t) this->command_);
     this->command_ = T6615Command::NONE;
     this->status_set_warning();
     return;
