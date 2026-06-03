@@ -14,6 +14,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/TurboChum/ESPhome-T6615-Component-Extended
+      ref: DEV
     components: [t6615]
 
 # ----- UART bus -----
@@ -27,7 +28,7 @@ uart:
 t6615:
   id: my_t6615
   uart_id: uart_bus
-  update_interval: 60s   # how often PPM + status are polled
+  update_interval: 60s
 
 # ----- CO2 and elevation (read-only) -----
 sensor:
@@ -45,9 +46,11 @@ text_sensor:
     serial_number:
       name: "Serial Number"
     firmware_version:
-      name: "Firmware Version"
+      name: "Firmware Version (COMPILE_SUBVOL)"
     firmware_date:
-      name: "Firmware Date"
+      name: "Firmware Date (COMPILE_DATE)"
+    selftest_result:
+      name: "Self-test Result"
 
 # ----- Status flags -----
 binary_sensor:
@@ -59,13 +62,25 @@ binary_sensor:
       name: "Sensor Warming Up"
     calibrating_flag:
       name: "Calibrating"
+    selftest_running:
+      name: "Self-test Running"
 
-# ----- Idle mode switch -----
+# ----- Switches -----
 switch:
   - platform: t6615
     t6615_id: my_t6615
     idle_mode:
       name: "Idle Mode (lamp off)"
+    # Must be turned ON before trigger_calibration button works.
+    # Auto-disarms after 5 minutes or immediately after calibration fires.
+    # NOTE: T6615 self-calibrates internally. Only use single-point
+    # calibration with a certified reference gas at the target PPM.
+    calibration_armed:
+      name: "Calibration Armed"
+    # ABC logic — only meaningful on T6613 (unreferenced single-beam).
+    # Has no effect on T6615 which uses a sealed reference channel.
+    abc_logic:
+      name: "ABC Logic (T6613 only)"
 
 # ----- Action buttons -----
 button:
@@ -73,8 +88,13 @@ button:
     t6615_id: my_t6615
     warm_reset:
       name: "Warm Reset"
+    # Requires: calibration_armed switch ON + not in warmup + not in error.
+    # Set calibration_ppm_target number first. Reference gas must be flowing.
     trigger_calibration:
       name: "Trigger Single-Point Calibration"
+    # Safe diagnostic — takes ~32 seconds, results in selftest_result sensor.
+    self_test:
+      name: "Run Self-Test"
 
 # ----- Writable numbers -----
 number:
@@ -82,5 +102,6 @@ number:
     t6615_id: my_t6615
     elevation:
       name: "Elevation (set)"
+    # Set this BEFORE pressing trigger_calibration.
     calibration_ppm_target:
       name: "Calibration PPM Target"

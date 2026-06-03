@@ -11,9 +11,10 @@ from . import CONF_T6615_ID, T6615Component
 
 DEPENDENCIES = ["t6615"]
 
-CONF_ERROR_FLAG = "error_flag"
-CONF_WARMUP_FLAG = "warmup_flag"
-CONF_CALIBRATING_FLAG = "calibrating_flag"
+CONF_ERROR_FLAG        = "error_flag"
+CONF_WARMUP_FLAG       = "warmup_flag"
+CONF_CALIBRATING_FLAG  = "calibrating_flag"
+CONF_SELFTEST_RUNNING  = "selftest_running"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -30,6 +31,10 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_CALIBRATING_FLAG): binary_sensor.binary_sensor_schema(
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             icon="mdi:tune",
+        ),
+        cv.Optional(CONF_SELFTEST_RUNNING): binary_sensor.binary_sensor_schema(
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            icon="mdi:microscope",
         ),
     }
 )
@@ -49,3 +54,7 @@ async def to_code(config):
     if cal_config := config.get(CONF_CALIBRATING_FLAG):
         sens = await binary_sensor.new_binary_sensor(cal_config)
         cg.add(parent.set_calibrating_binary_sensor(sens))
+
+    if selftest_config := config.get(CONF_SELFTEST_RUNNING):
+        sens = await binary_sensor.new_binary_sensor(selftest_config)
+        cg.add(parent.set_selftest_running_binary_sensor(sens))

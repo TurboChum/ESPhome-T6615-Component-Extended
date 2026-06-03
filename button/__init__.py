@@ -11,11 +11,13 @@ from esphome.const import (
 
 from .. import CONF_T6615_ID, T6615Component, t6615_ns
 
-WarmResetButton = t6615_ns.class_("WarmResetButton", button.Button)
-CalibrateButton = t6615_ns.class_("CalibrateButton", button.Button)
+WarmResetButton   = t6615_ns.class_("WarmResetButton",   button.Button)
+CalibrateButton   = t6615_ns.class_("CalibrateButton",   button.Button)
+SelfTestButton    = t6615_ns.class_("SelfTestButton",    button.Button)
 
-CONF_WARM_RESET = "warm_reset"
+CONF_WARM_RESET          = "warm_reset"
 CONF_TRIGGER_CALIBRATION = "trigger_calibration"
+CONF_SELF_TEST           = "self_test"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -32,6 +34,11 @@ CONFIG_SCHEMA = cv.Schema(
             entity_category=ENTITY_CATEGORY_CONFIG,
             icon="mdi:tune",
         ),
+        cv.Optional(CONF_SELF_TEST): button.button_schema(
+            SelfTestButton,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            icon="mdi:microscope",
+        ),
     }
 )
 
@@ -43,4 +50,8 @@ async def to_code(config):
 
     if cal_config := config.get(CONF_TRIGGER_CALIBRATION):
         b = await button.new_button(cal_config)
+        await cg.register_parented(b, config[CONF_T6615_ID])
+
+    if selftest_config := config.get(CONF_SELF_TEST):
+        b = await button.new_button(selftest_config)
         await cg.register_parented(b, config[CONF_T6615_ID])
