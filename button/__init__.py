@@ -11,6 +11,8 @@ from esphome.const import (
 
 from .. import CONF_T6615_ID, T6615Component, t6615_ns
 
+DEPENDENCIES = ["t6615"]
+
 WarmResetButton   = t6615_ns.class_("WarmResetButton",   button.Button)
 CalibrateButton   = t6615_ns.class_("CalibrateButton",   button.Button)
 SelfTestButton    = t6615_ns.class_("SelfTestButton",    button.Button)

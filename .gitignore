@@ -2,6 +2,9 @@
 CLAUDE.md
 SESSION_NOTES.md
 
+# Development / test scripts
+t6615_*.py
+
 # OS
 .DS_Store
 Thumbs.db

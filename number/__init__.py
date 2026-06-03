@@ -9,10 +9,12 @@ from esphome.const import (
 
 from .. import CONF_T6615_ID, T6615Component, t6615_ns
 
-ElevationNumber = t6615_ns.class_("ElevationNumber", number.Number)
+DEPENDENCIES = ["t6615"]
+
+ElevationNumber      = t6615_ns.class_("ElevationNumber",      number.Number)
 CalibrationPpmNumber = t6615_ns.class_("CalibrationPpmNumber", number.Number)
 
-CONF_ELEVATION = "elevation"
+CONF_ELEVATION    = "elevation"
 CONF_CAL_PPM_TARGET = "calibration_ppm_target"
 
 CONFIG_SCHEMA = cv.Schema(
@@ -36,24 +38,14 @@ CONFIG_SCHEMA = cv.Schema(
 
 
 async def to_code(config):
+    parent = await cg.get_variable(config[CONF_T6615_ID])
+
     if elev_config := config.get(CONF_ELEVATION):
-        n = await number.new_number(
-            elev_config,
-            min_value=0.0,
-            max_value=5000.0,
-            step=1.0,
-        )
+        n = await number.new_number(elev_config, min_value=0.0, max_value=5000.0, step=1.0)
         await cg.register_parented(n, config[CONF_T6615_ID])
-        parent = await cg.get_variable(config[CONF_T6615_ID])
         cg.add(parent.set_elevation_number(n))
 
     if cal_config := config.get(CONF_CAL_PPM_TARGET):
-        n = await number.new_number(
-            cal_config,
-            min_value=400.0,
-            max_value=2000.0,
-            step=1.0,
-        )
+        n = await number.new_number(cal_config, min_value=400.0, max_value=2000.0, step=1.0)
         await cg.register_parented(n, config[CONF_T6615_ID])
-        parent = await cg.get_variable(config[CONF_T6615_ID])
         cg.add(parent.set_cal_ppm_number(n))

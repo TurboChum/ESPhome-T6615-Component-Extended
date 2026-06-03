@@ -10,6 +10,8 @@ from esphome.const import (
 
 from .. import CONF_T6615_ID, T6615Component, t6615_ns
 
+DEPENDENCIES = ["t6615"]
+
 IdleModeSwitch        = t6615_ns.class_("IdleModeSwitch",        switch.Switch)
 CalibrationArmedSwitch = t6615_ns.class_("CalibrationArmedSwitch", switch.Switch)
 AbcSwitch             = t6615_ns.class_("AbcSwitch",             switch.Switch)
