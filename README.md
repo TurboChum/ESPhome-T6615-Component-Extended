@@ -27,7 +27,7 @@ All entities are **optional** — configure only the ones you want.
 
 ## Hardware notes
 
-- **Power:** the T6615 requires a **5 V supply** (~30 mA). A USB-to-TTL adapter will not power it on its own.
+- **Power:** the T6615 runs on **5 V** and draws very little (~30 mA), so the 5 V line from a USB-to-serial cable powers it comfortably — the Telaire eval kit ships with exactly such a cable for power and comms. When wiring to an ESP board, just feed the sensor 5 V (not 3.3 V).
 - **UART:** 19200 baud, 8 data bits, no parity, 1 stop bit (8N1). This is **5 V TTL UART**, not RS-232.
 - **Self-calibration:** the T6615 has a *sealed reference channel* and recalibrates itself internally about every 24 hours. It does **not** use ABC (Automatic Baseline Correction).
 
