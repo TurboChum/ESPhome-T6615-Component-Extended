@@ -52,6 +52,7 @@ async def to_code(config):
     if idle_config := config.get(CONF_IDLE_MODE):
         s = await switch.new_switch(idle_config)
         await cg.register_parented(s, config[CONF_T6615_ID])
+        cg.add(parent.set_idle_mode_switch(s))
 
     if cal_armed_config := config.get(CONF_CALIBRATION_ARMED):
         s = await switch.new_switch(cal_armed_config)

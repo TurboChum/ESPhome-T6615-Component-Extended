@@ -40,6 +40,19 @@ static const uint32_t T6615_CAL_ARMED_TIMEOUT_MS = 5 * 60 * 1000;
 // Self-test poll interval while test is running
 static const uint32_t T6615_SELFTEST_POLL_MS = 2000;
 
+// Self-test overall timeout — test normally completes in ~32s (16x DSP cycle).
+// If it has not completed by this point the sensor is assumed hung.
+static const uint32_t T6615_SELFTEST_TIMEOUT_MS = 60000;
+
+// GET_PPM retries within a single update cycle. The sensor silently drops
+// commands during its 1-2s DSP cycle; the 1s command timeout can land inside
+// it, so a few retries are needed to ride the cycle out.
+static const uint8_t T6615_PPM_MAX_RETRIES = 5;
+
+// Consecutive fully-failed update cycles before the CO2 sensor is marked
+// unavailable (NaN). At a 15s update_interval this is ~60s.
+static const uint8_t T6615_PPM_MAX_FAILED_CYCLES = 4;
+
 enum class T6615Command : uint8_t {
   NONE = 0,
   // Periodic polling
@@ -111,6 +124,7 @@ class T6615Component : public PollingComponent, public uart::UARTDevice {
 
   // --- Switches (parent holds pointer for state feedback) ---
 #ifdef USE_SWITCH
+  void set_idle_mode_switch(switch_::Switch *s) { this->idle_mode_switch_ = s; }
   void set_cal_armed_switch(switch_::Switch *s) { this->cal_armed_switch_ = s; }
   void set_abc_switch(switch_::Switch *s) { this->abc_switch_ = s; }
 #endif
@@ -140,8 +154,14 @@ class T6615Component : public PollingComponent, public uart::UARTDevice {
   bool boot_sequence_queued_{false};
   uint32_t setup_time_{0};
 
-  // Last status byte — used to suppress repeated 0x00 log spam
+  // Last status byte — used to suppress repeated 0x00 log spam, and as the
+  // authoritative source for the calibration warmup/error guard
   uint8_t last_status_{0xFF};  // 0xFF forces a log on first read
+  bool status_received_{false};
+
+  // GET_PPM failure tracking
+  uint8_t ppm_retry_count_{0};     // retries within the current cycle
+  uint8_t ppm_failed_cycles_{0};   // consecutive fully-failed cycles
 
   // Calibration armed interlock
   bool cal_armed_{false};
@@ -150,6 +170,7 @@ class T6615Component : public PollingComponent, public uart::UARTDevice {
   // Self-test state machine
   bool self_test_pending_result_{false};
   uint32_t last_self_test_poll_{0};
+  uint32_t self_test_start_time_{0};
 
 #ifdef USE_SENSOR
   sensor::Sensor *co2_sensor_{nullptr};
@@ -176,6 +197,7 @@ class T6615Component : public PollingComponent, public uart::UARTDevice {
 #endif
 
 #ifdef USE_SWITCH
+  switch_::Switch *idle_mode_switch_{nullptr};
   switch_::Switch *cal_armed_switch_{nullptr};
   switch_::Switch *abc_switch_{nullptr};
 #endif

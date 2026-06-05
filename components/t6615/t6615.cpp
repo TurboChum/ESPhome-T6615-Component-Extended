@@ -1,4 +1,5 @@
 #include "t6615.h"
+#include <cmath>
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
@@ -63,6 +64,18 @@ void T6615Component::loop() {
   }
 #endif
 
+  // Self-test overall timeout — guard against a sensor that never finishes
+  if (this->self_test_pending_result_ &&
+      (millis() - this->self_test_start_time_ > T6615_SELFTEST_TIMEOUT_MS)) {
+    ESP_LOGW(TAG, "Self-test did not complete within %us — aborting",
+             T6615_SELFTEST_TIMEOUT_MS / 1000);
+    this->self_test_pending_result_ = false;
+#ifdef USE_TEXT_SENSOR
+    if (this->selftest_result_ != nullptr)
+      this->selftest_result_->publish_state("TIMEOUT");
+#endif
+  }
+
   // Inject status polls while self-test is in progress
   if (this->self_test_pending_result_ && this->command_ == T6615Command::NONE &&
       (millis() - this->last_self_test_poll_ >= T6615_SELFTEST_POLL_MS)) {
@@ -87,9 +100,31 @@ void T6615Component::loop() {
 
     if (this->command_ == T6615Command::GET_PPM) {
       // Sensor silently drops commands during its internal DSP cycle (1-2s).
-      // Per datasheet: simply re-send. Retry once immediately.
-      ESP_LOGD(TAG, "GET_PPM dropped by sensor DSP cycle — retrying");
-      this->send_command_({T6615Command::GET_PPM});
+      // Per datasheet: simply re-send. Retry up to T6615_PPM_MAX_RETRIES times
+      // within this cycle to ride out the DSP cycle.
+      this->ppm_retry_count_++;
+      if (this->ppm_retry_count_ < T6615_PPM_MAX_RETRIES) {
+        ESP_LOGD(TAG, "GET_PPM dropped by sensor DSP cycle — retry %u/%u",
+                 this->ppm_retry_count_, T6615_PPM_MAX_RETRIES);
+        this->send_command_({T6615Command::GET_PPM});
+        return;
+      }
+
+      // Retries exhausted for this cycle
+      this->ppm_retry_count_ = 0;
+      if (this->ppm_failed_cycles_ < T6615_PPM_MAX_FAILED_CYCLES)
+        this->ppm_failed_cycles_++;
+      ESP_LOGW(TAG, "GET_PPM failed this cycle (%u consecutive)", this->ppm_failed_cycles_);
+
+      if (this->ppm_failed_cycles_ >= T6615_PPM_MAX_FAILED_CYCLES) {
+#ifdef USE_SENSOR
+        if (this->co2_sensor_ != nullptr)
+          this->co2_sensor_->publish_state(NAN);  // mark unavailable in HA
+#endif
+        ESP_LOGW(TAG, "GET_PPM unresponsive — CO2 marked unavailable");
+      }
+      this->command_ = T6615Command::NONE;
+      this->status_set_warning();
       return;
     }
 
@@ -271,6 +306,9 @@ void T6615Component::handle_response_(const uint8_t *buf, uint8_t /*total_len*/)
   switch (this->command_) {
 
     case T6615Command::GET_PPM: {
+      // Successful read — clear failure tracking
+      this->ppm_retry_count_ = 0;
+      this->ppm_failed_cycles_ = 0;
 #ifdef USE_SENSOR
       uint16_t ppm = encode_uint16(buf[3], buf[4]);
       ESP_LOGD(TAG, "CO₂=%uppm", ppm);
@@ -282,6 +320,7 @@ void T6615Component::handle_response_(const uint8_t *buf, uint8_t /*total_len*/)
 
     case T6615Command::GET_STATUS: {
       uint8_t status = buf[3];
+      this->status_received_ = true;
       // Only log when status changes or is non-zero — suppresses 0x00 spam
       if (status != this->last_status_) {
         if (status == 0x00)
@@ -305,6 +344,12 @@ void T6615Component::handle_response_(const uint8_t *buf, uint8_t /*total_len*/)
         this->calibrating_flag_->publish_state(status & T6615_STATUS_CAL);
       if (this->selftest_running_ != nullptr)
         this->selftest_running_->publish_state(status & T6615_STATUS_SELFTEST);
+#endif
+#ifdef USE_SWITCH
+      // Sync idle switch from the authoritative status bit (e.g. after a
+      // warm reset, idle clears on its own)
+      if (this->idle_mode_switch_ != nullptr)
+        this->idle_mode_switch_->publish_state(status & T6615_STATUS_IDLE);
 #endif
       // Drive self-test state machine
       if (this->self_test_pending_result_ && !(status & T6615_STATUS_SELFTEST)) {
@@ -417,6 +462,7 @@ void T6615Component::handle_response_(const uint8_t *buf, uint8_t /*total_len*/)
       ESP_LOGI(TAG, "Self-test started — polling status for completion");
       this->self_test_pending_result_ = true;
       this->last_self_test_poll_ = millis();
+      this->self_test_start_time_ = millis();
       break;
 
     case T6615Command::GET_SELF_TEST_RESULT: {
@@ -466,16 +512,20 @@ void T6615Component::queue_calibration() {
     ESP_LOGW(TAG, "Calibration blocked — arm the calibration switch first");
     return;
   }
-#ifdef USE_BINARY_SENSOR
-  if (this->warmup_flag_ != nullptr && this->warmup_flag_->state) {
+  // Guard on the internal status byte so the safety check does not depend on
+  // the user having configured the optional warmup/error binary sensors.
+  if (!this->status_received_) {
+    ESP_LOGW(TAG, "Calibration blocked — sensor status not yet read");
+    return;
+  }
+  if (this->last_status_ & T6615_STATUS_WARMUP) {
     ESP_LOGW(TAG, "Calibration blocked — sensor is in warmup");
     return;
   }
-  if (this->error_flag_ != nullptr && this->error_flag_->state) {
+  if (this->last_status_ & T6615_STATUS_ERROR) {
     ESP_LOGW(TAG, "Calibration blocked — sensor is in error state");
     return;
   }
-#endif
   // Verify the target PPM first, then trigger
   this->command_queue_.push_back({T6615Command::GET_CAL_PPM_TARGET});
   this->command_queue_.push_back({T6615Command::TRIGGER_CAL});
