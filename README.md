@@ -29,6 +29,7 @@ All entities are **optional** — configure only the ones you want.
 
 - **Power:** the T6615 runs on **5 V** and draws very little (~30 mA), so the 5 V line from a USB-to-serial cable powers it comfortably — the Telaire eval kit ships with exactly such a cable for power and comms. When wiring to an ESP board, just feed the sensor 5 V (not 3.3 V).
 - **UART:** 19200 baud, 8 data bits, no parity, 1 stop bit (8N1). This is **5 V TTL UART**, not RS-232.
+  - **Level shifting:** the ESP32 is a 3.3 V part and the sensor is 5 V, so the UART lines need translating between the two. A simple resistive divider (tried 1 kΩ / 2 kΩ) was **not** reliable in testing — use a proper level shifter. An **ADUM1201** (digital isolator) worked great and saves a lot of headaches.
 - **Self-calibration:** the T6615 has a *sealed reference channel* and recalibrates itself internally about every 24 hours. It does **not** use ABC (Automatic Baseline Correction).
 
 ### T6615 vs T6613
