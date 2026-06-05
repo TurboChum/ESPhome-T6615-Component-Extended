@@ -282,7 +282,20 @@ void T6615Component::handle_response_(const uint8_t *buf, uint8_t /*total_len*/)
 
     case T6615Command::GET_STATUS: {
       uint8_t status = buf[3];
-      ESP_LOGD(TAG, "Status=0x%02X", status);
+      // Only log when status changes or is non-zero — suppresses 0x00 spam
+      if (status != this->last_status_) {
+        if (status == 0x00)
+          ESP_LOGD(TAG, "Status=0x00 (normal)");
+        else
+          ESP_LOGW(TAG, "Status=0x%02X (error=%d warmup=%d cal=%d idle=%d selftest=%d)",
+                   status,
+                   (bool)(status & T6615_STATUS_ERROR),
+                   (bool)(status & T6615_STATUS_WARMUP),
+                   (bool)(status & T6615_STATUS_CAL),
+                   (bool)(status & T6615_STATUS_IDLE),
+                   (bool)(status & T6615_STATUS_SELFTEST));
+        this->last_status_ = status;
+      }
 #ifdef USE_BINARY_SENSOR
       if (this->error_flag_ != nullptr)
         this->error_flag_->publish_state(status & T6615_STATUS_ERROR);

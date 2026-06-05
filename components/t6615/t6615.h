@@ -140,6 +140,9 @@ class T6615Component : public PollingComponent, public uart::UARTDevice {
   bool boot_sequence_queued_{false};
   uint32_t setup_time_{0};
 
+  // Last status byte — used to suppress repeated 0x00 log spam
+  uint8_t last_status_{0xFF};  // 0xFF forces a log on first read
+
   // Calibration armed interlock
   bool cal_armed_{false};
   uint32_t cal_armed_time_{0};
