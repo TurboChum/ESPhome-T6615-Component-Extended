@@ -1,20 +1,14 @@
-# Claude Code
-CLAUDE.md
-SESSION_NOTES.md
-
-# Development / test scripts
-t6615_*.py
-
-# Personal ESPHome device configs (contain secrets/keys)
+# ESPHome device configs contain secrets (API keys, OTA passwords) —
+# never commit them; example.yaml is the sanitized reference config.
 *.yaml
 !example.yaml
+
+# Logs
+*.log
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Logs
-*.log
 
 # Editor
 .vscode/
