@@ -2,7 +2,6 @@ import esphome.codegen as cg
 from esphome.components import switch
 import esphome.config_validation as cv
 from esphome.const import (
-    CONF_ID,
     DEVICE_CLASS_SWITCH,
     ENTITY_CATEGORY_CONFIG,
     ENTITY_CATEGORY_DIAGNOSTIC,
@@ -12,35 +11,40 @@ from .. import CONF_T6615_ID, T6615Component, t6615_ns
 
 DEPENDENCIES = ["t6615"]
 
-IdleModeSwitch        = t6615_ns.class_("IdleModeSwitch",        switch.Switch)
+IdleModeSwitch = t6615_ns.class_("IdleModeSwitch", switch.Switch)
 CalibrationArmedSwitch = t6615_ns.class_("CalibrationArmedSwitch", switch.Switch)
-AbcSwitch             = t6615_ns.class_("AbcSwitch",             switch.Switch)
+AbcSwitch = t6615_ns.class_("AbcSwitch", switch.Switch)
 
-CONF_IDLE_MODE          = "idle_mode"
-CONF_CALIBRATION_ARMED  = "calibration_armed"
-CONF_ABC_LOGIC          = "abc_logic"
+CONF_IDLE_MODE = "idle_mode"
+CONF_CALIBRATION_ARMED = "calibration_armed"
+CONF_ABC_LOGIC = "abc_logic"
 
 CONFIG_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(CONF_ID): cv.declare_id(cg.EntityBase),
         cv.GenerateID(CONF_T6615_ID): cv.use_id(T6615Component),
         cv.Optional(CONF_IDLE_MODE): switch.switch_schema(
             IdleModeSwitch,
             device_class=DEVICE_CLASS_SWITCH,
             entity_category=ENTITY_CATEGORY_CONFIG,
             icon="mdi:sleep",
+            # Idle is a real device state; the status byte re-syncs it on boot.
+            default_restore_mode="ALWAYS_OFF",
         ),
         cv.Optional(CONF_CALIBRATION_ARMED): switch.switch_schema(
             CalibrationArmedSwitch,
             device_class=DEVICE_CLASS_SWITCH,
             entity_category=ENTITY_CATEGORY_CONFIG,
             icon="mdi:shield-key",
+            # Safety interlock: never restore armed across a reboot.
+            default_restore_mode="ALWAYS_OFF",
         ),
         cv.Optional(CONF_ABC_LOGIC): switch.switch_schema(
             AbcSwitch,
             device_class=DEVICE_CLASS_SWITCH,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             icon="mdi:refresh-auto",
+            # Actual ABC state is read from the sensor at boot via GET_ABC.
+            default_restore_mode="ALWAYS_OFF",
         ),
     }
 )

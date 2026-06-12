@@ -1,4 +1,5 @@
 #include "t6615.h"
+#include <cinttypes>
 #include <cmath>
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
@@ -7,18 +8,16 @@ namespace esphome::t6615 {
 
 static const char *const TAG = "t6615";
 
-static const uint32_t T6615_TIMEOUT      = 1000;
-static const uint8_t  T6615_MAGIC        = 0xFF;
-static const uint8_t  T6615_ADDR_HOST    = 0xFA;
-static const uint8_t  T6615_ADDR_SENSOR  = 0xFE;
+static const uint32_t T6615_TIMEOUT = 1000;
+static const uint8_t T6615_MAGIC = 0xFF;
+static const uint8_t T6615_ADDR_HOST = 0xFA;
+static const uint8_t T6615_ADDR_SENSOR = 0xFE;
 
 // ---------------------------------------------------------------------------
 // Boot / setup
 // ---------------------------------------------------------------------------
 
-void T6615Component::setup() {
-  this->setup_time_ = millis();
-}
+void T6615Component::setup() { this->setup_time_ = millis(); }
 
 void T6615Component::queue_boot_sequence_() {
   this->command_queue_.push_back({T6615Command::GET_SERIAL});
@@ -30,26 +29,51 @@ void T6615Component::queue_boot_sequence_() {
   this->command_queue_.push_back({T6615Command::GET_STATUS});
 }
 
+bool T6615Component::is_command_queued_(T6615Command command) const {
+  if (this->command_ == command)
+    return true;
+  for (const auto &pending : this->command_queue_) {
+    if (pending.command == command)
+      return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Periodic update
 // ---------------------------------------------------------------------------
 
 void T6615Component::update() {
+  // The sensor ignores UART during the power-up window; don't queue any work
+  // until the boot sequence has been scheduled (see loop()).
+  if (!this->boot_sequence_queued_)
+    return;
 #ifdef USE_SENSOR
-  if (this->co2_sensor_ != nullptr)
+  // Skip CO2 polling during a self-test: the sensor won't answer GET_PPM while
+  // testing, which would otherwise trip the failed-cycle counter and mark CO2
+  // unavailable. De-duplicate so a slow sensor can't stack up GET_PPM polls.
+  if (this->co2_sensor_ != nullptr && !this->self_test_pending_result_ &&
+      !this->is_command_queued_(T6615Command::GET_PPM))
     this->command_queue_.push_back({T6615Command::GET_PPM});
 #endif
-  this->command_queue_.push_back({T6615Command::GET_STATUS});
+  // De-duplicate status polls too, so an unresponsive sensor can't grow the
+  // queue without bound.
+  if (!this->is_command_queued_(T6615Command::GET_STATUS))
+    this->command_queue_.push_back({T6615Command::GET_STATUS});
 }
 
 // ---------------------------------------------------------------------------
-// Main loop — non-blocking state machine
+// Main loop - non-blocking state machine
 // ---------------------------------------------------------------------------
 
 void T6615Component::loop() {
-  // Delay boot sequence — sensor needs several seconds after power-up
-  // before it responds to any UART commands (per datasheet)
-  if (!this->boot_sequence_queued_ && (millis() - this->setup_time_ >= 8000)) {
+  // Hold off all communication until the power-up delay elapses, then queue
+  // the one-time boot reads. Nothing is dispatched before this point, so a
+  // short update_interval (or a WARM_RESET) cannot fire commands into the
+  // window where the sensor is still ignoring UART.
+  if (!this->boot_sequence_queued_) {
+    if (millis() - this->setup_time_ < T6615_STARTUP_DELAY_MS)
+      return;
     this->queue_boot_sequence_();
     this->boot_sequence_queued_ = true;
   }
@@ -57,18 +81,17 @@ void T6615Component::loop() {
   // Auto-disarm calibration armed switch after timeout
 #ifdef USE_SWITCH
   if (this->cal_armed_ && (millis() - this->cal_armed_time_ > T6615_CAL_ARMED_TIMEOUT_MS)) {
-    ESP_LOGI(TAG, "Calibration armed timeout — disarming");
+    ESP_LOGI(TAG, "Calibration armed timeout - disarming");
     this->cal_armed_ = false;
     if (this->cal_armed_switch_ != nullptr)
       this->cal_armed_switch_->publish_state(false);
   }
 #endif
 
-  // Self-test overall timeout — guard against a sensor that never finishes
+  // Self-test overall timeout - guard against a sensor that never finishes
   if (this->self_test_pending_result_ &&
       (millis() - this->self_test_start_time_ > T6615_SELFTEST_TIMEOUT_MS)) {
-    ESP_LOGW(TAG, "Self-test did not complete within %us — aborting",
-             T6615_SELFTEST_TIMEOUT_MS / 1000);
+    ESP_LOGW(TAG, "Self-test did not complete within %" PRIu32 "s - aborting", T6615_SELFTEST_TIMEOUT_MS / 1000);
     this->self_test_pending_result_ = false;
 #ifdef USE_TEXT_SENSOR
     if (this->selftest_result_ != nullptr)
@@ -93,7 +116,7 @@ void T6615Component::loop() {
     return;
   }
 
-  // Timeout handling — behaviour depends on command
+  // Timeout handling - behaviour depends on command
   if (millis() - this->command_time_ > T6615_TIMEOUT) {
     while (this->available())
       this->read();
@@ -104,8 +127,8 @@ void T6615Component::loop() {
       // within this cycle to ride out the DSP cycle.
       this->ppm_retry_count_++;
       if (this->ppm_retry_count_ < T6615_PPM_MAX_RETRIES) {
-        ESP_LOGD(TAG, "GET_PPM dropped by sensor DSP cycle — retry %u/%u",
-                 this->ppm_retry_count_, T6615_PPM_MAX_RETRIES);
+        ESP_LOGD(TAG, "GET_PPM dropped by sensor DSP cycle - retry %u/%u", this->ppm_retry_count_,
+                 T6615_PPM_MAX_RETRIES);
         this->send_command_({T6615Command::GET_PPM});
         return;
       }
@@ -121,7 +144,7 @@ void T6615Component::loop() {
         if (this->co2_sensor_ != nullptr)
           this->co2_sensor_->publish_state(NAN);  // mark unavailable in HA
 #endif
-        ESP_LOGW(TAG, "GET_PPM unresponsive — CO2 marked unavailable");
+        ESP_LOGW(TAG, "GET_PPM unresponsive - CO2 marked unavailable");
       }
       this->command_ = T6615Command::NONE;
       this->status_set_warning();
@@ -130,13 +153,13 @@ void T6615Component::loop() {
 
     if (this->command_ == T6615Command::GET_ABC) {
       // T6615 uses a sealed reference channel and does not implement ABC logic.
-      // This timeout is expected on T6615 hardware — not a comms error.
-      ESP_LOGD(TAG, "GET_ABC not acknowledged (expected on T6615 — no ABC on dual-beam sensor)");
+      // This timeout is expected on T6615 hardware - not a comms error.
+      ESP_LOGD(TAG, "GET_ABC not acknowledged (expected on T6615 - no ABC on dual-beam sensor)");
       this->command_ = T6615Command::NONE;
       return;
     }
 
-    ESP_LOGW(TAG, "Timeout on command %u", (uint8_t) this->command_);
+    ESP_LOGW(TAG, "Timeout on command %u", static_cast<uint8_t>(this->command_));
     this->command_ = T6615Command::NONE;
     this->status_set_warning();
     return;
@@ -144,7 +167,7 @@ void T6615Component::loop() {
 
   // Wait until full expected response is buffered
   uint8_t expected = 3 + this->response_data_len_();
-  if (this->available() < (int) expected)
+  if (this->available() < static_cast<int>(expected))
     return;
 
   uint8_t buf[20] = {};
@@ -152,6 +175,18 @@ void T6615Component::loop() {
 
   if (buf[0] != T6615_MAGIC || buf[1] != T6615_ADDR_HOST) {
     ESP_LOGW(TAG, "Bad response header: %02X %02X", buf[0], buf[1]);
+    while (this->available())
+      this->read();
+    this->command_ = T6615Command::NONE;
+    this->status_set_warning();
+    return;
+  }
+
+  // The length byte must match the expected payload size; a mismatch means the
+  // framing has desynced (e.g. a delayed reply), so discard and recover rather
+  // than mis-parse stale bytes.
+  if (buf[2] != this->response_data_len_()) {
+    ESP_LOGW(TAG, "Bad response length: got %u, expected %u", buf[2], this->response_data_len_());
     while (this->available())
       this->read();
     this->command_ = T6615Command::NONE;
@@ -174,90 +209,130 @@ void T6615Component::send_command_(const T6615PendingCommand &pending) {
   this->write_byte(T6615_ADDR_SENSOR);
 
   switch (pending.command) {
-    // READ commands — payload: {0x02, <cmd_byte>}
+    // READ commands - payload: {0x02, <cmd_byte>}
     case T6615Command::GET_PPM:
-      this->write_byte(2); this->write_byte(0x02); this->write_byte(0x03);
+      this->write_byte(2);
+      this->write_byte(0x02);
+      this->write_byte(0x03);
       break;
     case T6615Command::GET_SERIAL:
-      this->write_byte(2); this->write_byte(0x02); this->write_byte(0x01);
+      this->write_byte(2);
+      this->write_byte(0x02);
+      this->write_byte(0x01);
       break;
     case T6615Command::GET_FIRMWARE_VERSION:
-      this->write_byte(2); this->write_byte(0x02); this->write_byte(0x0D);
+      this->write_byte(2);
+      this->write_byte(0x02);
+      this->write_byte(0x0D);
       break;
     case T6615Command::GET_FIRMWARE_DATE:
-      this->write_byte(2); this->write_byte(0x02); this->write_byte(0x0C);
+      this->write_byte(2);
+      this->write_byte(0x02);
+      this->write_byte(0x0C);
       break;
     case T6615Command::GET_ELEVATION:
-      this->write_byte(2); this->write_byte(0x02); this->write_byte(0x0F);
+      this->write_byte(2);
+      this->write_byte(0x02);
+      this->write_byte(0x0F);
       break;
     case T6615Command::GET_CAL_PPM_TARGET:
-      this->write_byte(2); this->write_byte(0x02); this->write_byte(0x11);
+      this->write_byte(2);
+      this->write_byte(0x02);
+      this->write_byte(0x11);
       break;
 
     // STATUS
     case T6615Command::GET_STATUS:
-      this->write_byte(1); this->write_byte(0xB6);
+      this->write_byte(1);
+      this->write_byte(0xB6);
       break;
 
     // ABC (returns 1 data byte, not ACK)
     case T6615Command::GET_ABC:
-      this->write_byte(2); this->write_byte(0xB7); this->write_byte(0x00);
+      this->write_byte(2);
+      this->write_byte(0xB7);
+      this->write_byte(0x00);
       break;
     case T6615Command::SET_ABC_ON:
-      this->write_byte(2); this->write_byte(0xB7); this->write_byte(0x01);
+      this->write_byte(2);
+      this->write_byte(0xB7);
+      this->write_byte(0x01);
       break;
     case T6615Command::SET_ABC_OFF:
-      this->write_byte(2); this->write_byte(0xB7); this->write_byte(0x02);
+      this->write_byte(2);
+      this->write_byte(0xB7);
+      this->write_byte(0x02);
       break;
     case T6615Command::RESET_ABC:
-      this->write_byte(2); this->write_byte(0xB7); this->write_byte(0x03);
+      this->write_byte(2);
+      this->write_byte(0xB7);
+      this->write_byte(0x03);
       break;
 
-    // UPDATE commands — payload: {0x03, <cmd_byte>, <msb>, <lsb>}
+    // UPDATE commands - payload: {0x03, <cmd_byte>, <msb>, <lsb>}
     case T6615Command::SET_ELEVATION: {
       uint8_t msb = (pending.value >> 8) & 0xFF;
       uint8_t lsb = pending.value & 0xFF;
       this->write_byte(4);
-      this->write_byte(0x03); this->write_byte(0x0F);
-      this->write_byte(msb);  this->write_byte(lsb);
+      this->write_byte(0x03);
+      this->write_byte(0x0F);
+      this->write_byte(msb);
+      this->write_byte(lsb);
       break;
     }
     case T6615Command::SET_CAL_PPM_TARGET: {
       uint8_t msb = (pending.value >> 8) & 0xFF;
       uint8_t lsb = pending.value & 0xFF;
       this->write_byte(4);
-      this->write_byte(0x03); this->write_byte(0x11);
-      this->write_byte(msb);  this->write_byte(lsb);
+      this->write_byte(0x03);
+      this->write_byte(0x11);
+      this->write_byte(msb);
+      this->write_byte(lsb);
       break;
     }
 
     // ACTION commands
     case T6615Command::WARM_RESET:
-      this->write_byte(1); this->write_byte(0x84);
+      this->write_byte(1);
+      this->write_byte(0x84);
       // Sensor may or may not ACK before resetting; treat as fire-and-forget.
-      // Re-arm the startup delay so boot sequence waits for sensor to restart.
+      // Drop any queued work, reset failure tracking, and re-arm the startup
+      // delay so the boot sequence waits for the sensor to restart.
+      this->command_queue_.clear();
+      this->ppm_retry_count_ = 0;
+      this->ppm_failed_cycles_ = 0;
+      this->self_test_pending_result_ = false;
       this->boot_sequence_queued_ = false;
       this->setup_time_ = millis();
       this->command_ = T6615Command::NONE;
       return;
 
     case T6615Command::TRIGGER_CAL:
-      this->write_byte(1); this->write_byte(0x9B);
+      this->write_byte(1);
+      this->write_byte(0x9B);
       break;
 
     case T6615Command::SET_IDLE_ON:
-      this->write_byte(2); this->write_byte(0xB9); this->write_byte(0x01);
+      this->write_byte(2);
+      this->write_byte(0xB9);
+      this->write_byte(0x01);
       break;
     case T6615Command::SET_IDLE_OFF:
-      this->write_byte(2); this->write_byte(0xB9); this->write_byte(0x02);
+      this->write_byte(2);
+      this->write_byte(0xB9);
+      this->write_byte(0x02);
       break;
 
     // Self-test
     case T6615Command::SELF_TEST_START:
-      this->write_byte(2); this->write_byte(0xC0); this->write_byte(0x00);
+      this->write_byte(2);
+      this->write_byte(0xC0);
+      this->write_byte(0x00);
       break;
     case T6615Command::GET_SELF_TEST_RESULT:
-      this->write_byte(2); this->write_byte(0xC0); this->write_byte(0x01);
+      this->write_byte(2);
+      this->write_byte(0xC0);
+      this->write_byte(0x01);
       break;
 
     default:
@@ -275,26 +350,34 @@ void T6615Component::send_command_(const T6615PendingCommand &pending) {
 
 uint8_t T6615Component::response_data_len_() const {
   switch (this->command_) {
-    case T6615Command::GET_SERIAL:            return 15;
-    case T6615Command::GET_FIRMWARE_VERSION:  return 3;
-    case T6615Command::GET_FIRMWARE_DATE:     return 6;
-    case T6615Command::GET_STATUS:            return 1;
+    case T6615Command::GET_SERIAL:
+      return 15;
+    case T6615Command::GET_FIRMWARE_VERSION:
+      return 3;
+    case T6615Command::GET_FIRMWARE_DATE:
+      return 6;
+    case T6615Command::GET_STATUS:
+      return 1;
     // ABC commands return 1 data byte (0x01 or 0x02), NOT an ACK
     case T6615Command::GET_ABC:
     case T6615Command::SET_ABC_ON:
     case T6615Command::SET_ABC_OFF:
-    case T6615Command::RESET_ABC:             return 1;
+    case T6615Command::RESET_ABC:
+      return 1;
     // Self-test result: 4 bytes (test_flag, pga, good_dsp, total_dsp)
-    case T6615Command::GET_SELF_TEST_RESULT:  return 4;
+    case T6615Command::GET_SELF_TEST_RESULT:
+      return 4;
     // UPDATE ACK / action ACK: FF FA 00 (0 data bytes)
     case T6615Command::SET_ELEVATION:
     case T6615Command::SET_CAL_PPM_TARGET:
     case T6615Command::TRIGGER_CAL:
     case T6615Command::SET_IDLE_ON:
     case T6615Command::SET_IDLE_OFF:
-    case T6615Command::SELF_TEST_START:       return 0;
+    case T6615Command::SELF_TEST_START:
+      return 0;
     // PPM, elevation, cal target: 2 data bytes
-    default:                                  return 2;
+    default:
+      return 2;
   }
 }
 
@@ -304,14 +387,13 @@ uint8_t T6615Component::response_data_len_() const {
 
 void T6615Component::handle_response_(const uint8_t *buf, uint8_t /*total_len*/) {
   switch (this->command_) {
-
     case T6615Command::GET_PPM: {
-      // Successful read — clear failure tracking
+      // Successful read - clear failure tracking
       this->ppm_retry_count_ = 0;
       this->ppm_failed_cycles_ = 0;
 #ifdef USE_SENSOR
       uint16_t ppm = encode_uint16(buf[3], buf[4]);
-      ESP_LOGD(TAG, "CO₂=%uppm", ppm);
+      ESP_LOGD(TAG, "CO2=%uppm", ppm);
       if (this->co2_sensor_ != nullptr)
         this->co2_sensor_->publish_state(ppm);
 #endif
@@ -321,18 +403,15 @@ void T6615Component::handle_response_(const uint8_t *buf, uint8_t /*total_len*/)
     case T6615Command::GET_STATUS: {
       uint8_t status = buf[3];
       this->status_received_ = true;
-      // Only log when status changes or is non-zero — suppresses 0x00 spam
+      // Only log when status changes or is non-zero - suppresses 0x00 spam
       if (status != this->last_status_) {
         if (status == 0x00)
           ESP_LOGD(TAG, "Status=0x00 (normal)");
         else
-          ESP_LOGW(TAG, "Status=0x%02X (error=%d warmup=%d cal=%d idle=%d selftest=%d)",
-                   status,
-                   (bool)(status & T6615_STATUS_ERROR),
-                   (bool)(status & T6615_STATUS_WARMUP),
-                   (bool)(status & T6615_STATUS_CAL),
-                   (bool)(status & T6615_STATUS_IDLE),
-                   (bool)(status & T6615_STATUS_SELFTEST));
+          ESP_LOGW(TAG, "Status=0x%02X (error=%d warmup=%d cal=%d idle=%d selftest=%d)", status,
+                   (bool) (status & T6615_STATUS_ERROR), (bool) (status & T6615_STATUS_WARMUP),
+                   (bool) (status & T6615_STATUS_CAL), (bool) (status & T6615_STATUS_IDLE),
+                   (bool) (status & T6615_STATUS_SELFTEST));
         this->last_status_ = status;
       }
 #ifdef USE_BINARY_SENSOR
@@ -353,7 +432,7 @@ void T6615Component::handle_response_(const uint8_t *buf, uint8_t /*total_len*/)
 #endif
       // Drive self-test state machine
       if (this->self_test_pending_result_ && !(status & T6615_STATUS_SELFTEST)) {
-        ESP_LOGI(TAG, "Self-test complete — reading results");
+        ESP_LOGI(TAG, "Self-test complete - reading results");
         this->self_test_pending_result_ = false;
         this->command_queue_.push_front({T6615Command::GET_SELF_TEST_RESULT});
       }
@@ -363,7 +442,7 @@ void T6615Component::handle_response_(const uint8_t *buf, uint8_t /*total_len*/)
     case T6615Command::GET_SERIAL: {
 #ifdef USE_TEXT_SENSOR
       if (this->serial_number_ != nullptr) {
-        // 15-byte null-padded ASCII — strip trailing nulls
+        // 15-byte null-padded ASCII - strip trailing nulls
         const char *start = reinterpret_cast<const char *>(buf + 3);
         uint8_t len = 0;
         while (len < 15 && start[len] != '\0')
@@ -459,7 +538,7 @@ void T6615Component::handle_response_(const uint8_t *buf, uint8_t /*total_len*/)
       break;
 
     case T6615Command::SELF_TEST_START:
-      ESP_LOGI(TAG, "Self-test started — polling status for completion");
+      ESP_LOGI(TAG, "Self-test started - polling status for completion");
       this->self_test_pending_result_ = true;
       this->last_self_test_poll_ = millis();
       this->self_test_start_time_ = millis();
@@ -467,20 +546,19 @@ void T6615Component::handle_response_(const uint8_t *buf, uint8_t /*total_len*/)
 
     case T6615Command::GET_SELF_TEST_RESULT: {
       // buf[3]=test_flag buf[4]=pga_status buf[5]=good_dsp buf[6]=total_dsp
-      uint8_t test_flag  = buf[3];
+      uint8_t test_flag = buf[3];
       uint8_t pga_status = buf[4];
-      uint8_t good_dsp   = buf[5];
-      uint8_t total_dsp  = buf[6];
+      uint8_t good_dsp = buf[5];
+      uint8_t total_dsp = buf[6];
       bool complete = (test_flag == 0x0F);
       bool pga_pass = (pga_status == 0x01);
-      ESP_LOGI(TAG, "Self-test: flag=0x%02X PGA=%s DSP=%u/%u",
-               test_flag, pga_pass ? "PASS" : "FAIL", good_dsp, total_dsp);
+      ESP_LOGI(TAG, "Self-test: flag=0x%02X PGA=%s DSP=%u/%u", test_flag, pga_pass ? "PASS" : "FAIL", good_dsp,
+               total_dsp);
 #ifdef USE_TEXT_SENSOR
       if (this->selftest_result_ != nullptr) {
         char result[48];
         if (complete)
-          snprintf(result, sizeof(result), "PGA:%s DSP:%u/%u",
-                   pga_pass ? "PASS" : "FAIL", good_dsp, total_dsp);
+          snprintf(result, sizeof(result), "PGA:%s DSP:%u/%u", pga_pass ? "PASS" : "FAIL", good_dsp, total_dsp);
         else
           snprintf(result, sizeof(result), "INCOMPLETE (flag=0x%02X)", test_flag);
         this->selftest_result_->publish_state(result);
@@ -503,27 +581,25 @@ void T6615Component::handle_response_(const uint8_t *buf, uint8_t /*total_len*/)
 // Public queue helpers
 // ---------------------------------------------------------------------------
 
-void T6615Component::queue_warm_reset() {
-  this->command_queue_.push_back({T6615Command::WARM_RESET});
-}
+void T6615Component::queue_warm_reset() { this->command_queue_.push_back({T6615Command::WARM_RESET}); }
 
 void T6615Component::queue_calibration() {
   if (!this->cal_armed_) {
-    ESP_LOGW(TAG, "Calibration blocked — arm the calibration switch first");
+    ESP_LOGW(TAG, "Calibration blocked - arm the calibration switch first");
     return;
   }
   // Guard on the internal status byte so the safety check does not depend on
   // the user having configured the optional warmup/error binary sensors.
   if (!this->status_received_) {
-    ESP_LOGW(TAG, "Calibration blocked — sensor status not yet read");
+    ESP_LOGW(TAG, "Calibration blocked - sensor status not yet read");
     return;
   }
   if (this->last_status_ & T6615_STATUS_WARMUP) {
-    ESP_LOGW(TAG, "Calibration blocked — sensor is in warmup");
+    ESP_LOGW(TAG, "Calibration blocked - sensor is in warmup");
     return;
   }
   if (this->last_status_ & T6615_STATUS_ERROR) {
-    ESP_LOGW(TAG, "Calibration blocked — sensor is in error state");
+    ESP_LOGW(TAG, "Calibration blocked - sensor is in error state");
     return;
   }
   // Verify the target PPM first, then trigger
@@ -535,7 +611,7 @@ void T6615Component::set_cal_armed(bool armed) {
   this->cal_armed_ = armed;
   if (armed) {
     this->cal_armed_time_ = millis();
-    ESP_LOGI(TAG, "Calibration armed — will auto-disarm in 5 minutes");
+    ESP_LOGI(TAG, "Calibration armed - will auto-disarm in 5 minutes");
   } else {
     ESP_LOGI(TAG, "Calibration disarmed");
   }
@@ -572,6 +648,7 @@ void T6615Component::queue_abc_logic(bool enable) {
 void T6615Component::dump_config() {
   ESP_LOGCONFIG(TAG, "T6615:");
   this->check_uart_settings(19200);
+  LOG_UPDATE_INTERVAL(this);
 #ifdef USE_SENSOR
   LOG_SENSOR("  ", "CO2", this->co2_sensor_);
   LOG_SENSOR("  ", "Elevation", this->elevation_sensor_);
@@ -587,6 +664,15 @@ void T6615Component::dump_config() {
   LOG_BINARY_SENSOR("  ", "Warmup", this->warmup_flag_);
   LOG_BINARY_SENSOR("  ", "Calibrating", this->calibrating_flag_);
   LOG_BINARY_SENSOR("  ", "Self-test Running", this->selftest_running_);
+#endif
+#ifdef USE_NUMBER
+  LOG_NUMBER("  ", "Elevation", this->elevation_number_);
+  LOG_NUMBER("  ", "Calibration PPM Target", this->cal_ppm_number_);
+#endif
+#ifdef USE_SWITCH
+  LOG_SWITCH("  ", "Idle Mode", this->idle_mode_switch_);
+  LOG_SWITCH("  ", "Calibration Armed", this->cal_armed_switch_);
+  LOG_SWITCH("  ", "ABC Logic", this->abc_switch_);
 #endif
 }
 

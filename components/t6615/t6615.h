@@ -2,6 +2,7 @@
 
 #include <deque>
 #include "esphome/core/component.h"
+#include "esphome/core/helpers.h"
 #include "esphome/components/uart/uart.h"
 
 #ifdef USE_SENSOR
@@ -27,12 +28,16 @@
 namespace esphome::t6615 {
 
 // Status byte bit flags (CMD_STATUS 0xB6 response)
-static const uint8_t T6615_STATUS_ERROR    = 1 << 0;
-static const uint8_t T6615_STATUS_WARMUP   = 1 << 1;
-static const uint8_t T6615_STATUS_CAL      = 1 << 2;
-static const uint8_t T6615_STATUS_IDLE     = 1 << 3;
+static const uint8_t T6615_STATUS_ERROR = 1 << 0;
+static const uint8_t T6615_STATUS_WARMUP = 1 << 1;
+static const uint8_t T6615_STATUS_CAL = 1 << 2;
+static const uint8_t T6615_STATUS_IDLE = 1 << 3;
 // bits 4-6 internal
 static const uint8_t T6615_STATUS_SELFTEST = 1 << 7;  // bit 7 per datasheet
+
+// The sensor ignores UART traffic for several seconds after power-up (per
+// datasheet). Hold off all communication until this delay has elapsed.
+static const uint32_t T6615_STARTUP_DELAY_MS = 8000;
 
 // Calibration armed timeout: 5 minutes
 static const uint32_t T6615_CAL_ARMED_TIMEOUT_MS = 5 * 60 * 1000;
@@ -40,7 +45,7 @@ static const uint32_t T6615_CAL_ARMED_TIMEOUT_MS = 5 * 60 * 1000;
 // Self-test poll interval while test is running
 static const uint32_t T6615_SELFTEST_POLL_MS = 2000;
 
-// Self-test overall timeout — test normally completes in ~32s (16x DSP cycle).
+// Self-test overall timeout - test normally completes in ~32s (16x DSP cycle).
 // If it has not completed by this point the sensor is assumed hung.
 static const uint32_t T6615_SELFTEST_TIMEOUT_MS = 60000;
 
@@ -93,6 +98,7 @@ class T6615Component : public PollingComponent, public uart::UARTDevice {
   void loop() override;
   void update() override;
   void dump_config() override;
+  float get_setup_priority() const override { return setup_priority::DATA; }
 
   // --- Sensors ---
 #ifdef USE_SENSOR
@@ -144,24 +150,27 @@ class T6615Component : public PollingComponent, public uart::UARTDevice {
   void handle_response_(const uint8_t *buf, uint8_t total_len);
   uint8_t response_data_len_() const;
   void queue_boot_sequence_();
+  // True if the command is already in flight or waiting in the queue. Used to
+  // avoid stacking duplicate periodic polls when the sensor stops responding.
+  bool is_command_queued_(T6615Command command) const;
 
   T6615Command command_{T6615Command::NONE};
   uint32_t command_time_{0};
   std::deque<T6615PendingCommand> command_queue_;
 
-  // Startup delay — sensor needs several seconds after power-up before
+  // Startup delay - sensor needs several seconds after power-up before
   // it will respond to any UART commands (per datasheet)
   bool boot_sequence_queued_{false};
   uint32_t setup_time_{0};
 
-  // Last status byte — used to suppress repeated 0x00 log spam, and as the
+  // Last status byte - used to suppress repeated 0x00 log spam, and as the
   // authoritative source for the calibration warmup/error guard
   uint8_t last_status_{0xFF};  // 0xFF forces a log on first read
   bool status_received_{false};
 
   // GET_PPM failure tracking
-  uint8_t ppm_retry_count_{0};     // retries within the current cycle
-  uint8_t ppm_failed_cycles_{0};   // consecutive fully-failed cycles
+  uint8_t ppm_retry_count_{0};    // retries within the current cycle
+  uint8_t ppm_failed_cycles_{0};  // consecutive fully-failed cycles
 
   // Calibration armed interlock
   bool cal_armed_{false};

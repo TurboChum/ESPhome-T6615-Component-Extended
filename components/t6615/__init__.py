@@ -5,6 +5,7 @@ from esphome.const import CONF_ID
 
 CODEOWNERS = ["@TurboChum"]
 DEPENDENCIES = ["uart"]
+MULTI_CONF = True
 
 t6615_ns = cg.esphome_ns.namespace("t6615")
 T6615Component = t6615_ns.class_("T6615Component", cg.PollingComponent, uart.UARTDevice)

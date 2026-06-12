@@ -2,7 +2,6 @@ import esphome.codegen as cg
 from esphome.components import button
 import esphome.config_validation as cv
 from esphome.const import (
-    CONF_ID,
     DEVICE_CLASS_RESTART,
     ENTITY_CATEGORY_CONFIG,
     ENTITY_CATEGORY_DIAGNOSTIC,
@@ -13,17 +12,16 @@ from .. import CONF_T6615_ID, T6615Component, t6615_ns
 
 DEPENDENCIES = ["t6615"]
 
-WarmResetButton   = t6615_ns.class_("WarmResetButton",   button.Button)
-CalibrateButton   = t6615_ns.class_("CalibrateButton",   button.Button)
-SelfTestButton    = t6615_ns.class_("SelfTestButton",    button.Button)
+WarmResetButton = t6615_ns.class_("WarmResetButton", button.Button)
+CalibrateButton = t6615_ns.class_("CalibrateButton", button.Button)
+SelfTestButton = t6615_ns.class_("SelfTestButton", button.Button)
 
-CONF_WARM_RESET          = "warm_reset"
+CONF_WARM_RESET = "warm_reset"
 CONF_TRIGGER_CALIBRATION = "trigger_calibration"
-CONF_SELF_TEST           = "self_test"
+CONF_SELF_TEST = "self_test"
 
 CONFIG_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(CONF_ID): cv.declare_id(cg.EntityBase),
         cv.GenerateID(CONF_T6615_ID): cv.use_id(T6615Component),
         cv.Optional(CONF_WARM_RESET): button.button_schema(
             WarmResetButton,

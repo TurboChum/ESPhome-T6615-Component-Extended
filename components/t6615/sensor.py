@@ -3,13 +3,12 @@ from esphome.components import sensor
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_CO2,
-    CONF_ID,
     DEVICE_CLASS_CARBON_DIOXIDE,
     STATE_CLASS_MEASUREMENT,
     UNIT_PARTS_PER_MILLION,
 )
 
-from . import CONF_T6615_ID, T6615Component, t6615_ns
+from . import CONF_T6615_ID, T6615Component
 
 DEPENDENCIES = ["t6615"]
 
@@ -17,7 +16,6 @@ CONF_ELEVATION_READING = "elevation_reading"
 
 CONFIG_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(CONF_ID): cv.declare_id(cg.EntityBase),
         cv.GenerateID(CONF_T6615_ID): cv.use_id(T6615Component),
         cv.Optional(CONF_CO2): sensor.sensor_schema(
             unit_of_measurement=UNIT_PARTS_PER_MILLION,
